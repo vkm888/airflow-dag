@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
-# from airflow.operators.python import PythonOperator #попередження про "застарілий імпорт" (Deprecation Warning)
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator #попередження про "застарілий імпорт" (Deprecation Warning)
+# from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime
 
