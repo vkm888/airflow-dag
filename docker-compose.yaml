@@ -1,0 +1,135 @@
+x-airflow-common:
+  &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.10.4}
+  environment:
+    &airflow-common-env
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    # Вказуємо на папку dags всередині вашого репозиторію
+    # AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags/repo/dags
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags/repo
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAG_LOG_REPLICATION: 'true'
+    # Змінні для автоматичного створення користувача через entrypoint
+    _AIRFLOW_WWW_USER_CREATE: 'true'
+    _AIRFLOW_WWW_USER_USERNAME: 'airflow'
+    _AIRFLOW_WWW_USER_PASSWORD: 'airflow'
+    # _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-common-sql apache-airflow-providers-standard"
+    # _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-common-sql"
+    # _PIP_ADDITIONAL_DEPENDENCIES: "apache-airflow-providers-postgres apache-airflow-providers-common-sql
+  volumes:
+    - dags_data:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: airflow-postgres
+    ports:
+      - "5432:5432"  # Прокидаємо порт: ЛОКАЛЬНИЙ:КОНТЕЙНЕРНИЙ
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    # Налаштування для логічної реплікації
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_replication_slots=10
+      -c max_wal_senders=10
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7.2-bookworm
+    container_name: airflow-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  # СЕРВІС СИНХРОНІЗАЦІЇ З GIT
+  # Цей сервіс заходить під root, виправляє права і вимикається
+  fix-permissions:
+    image: busybox
+    container_name: fix-permissions
+    user: "0:0"
+    command: chown -R 50000:0 /git
+    volumes:
+      - dags_data:/git
+
+  git-sync:
+    image: registry.k8s.io/git-sync/git-sync:v4.2.3
+    container_name: git-sync
+    user: "50000:0"
+    # Тепер він чекає, поки fix-permissions закінчить роботу
+    depends_on:
+      fix-permissions:
+        condition: service_completed_successfully
+    environment:
+      GITSYNC_REPO: "https://github.com/vkm888/airflow-dag.git"
+      GITSYNC_REF: "main"
+      GITSYNC_PERIOD: "60s"
+      GITSYNC_ROOT: "/git"
+      GITSYNC_LINK: "repo"
+    volumes:
+      - dags_data:/git
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+
+  airflow-worker:
+    <<: *airflow-common
+    container_name: airflow-worker
+    command: celery worker
+
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: airflow-triggerer
+    command: triggerer
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins
+        exec /entrypoint airflow db init && \
+        airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com
+
+volumes:
+  postgres-db-volume:
+  dags_data:
+  logs_data:
+  plugins_data:
