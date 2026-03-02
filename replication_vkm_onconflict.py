@@ -8,7 +8,7 @@ from datetime import datetime
 def migrate_data():
     # 1. Підключаємось до Джерела та Приймача
     source_hook = PostgresHook(postgres_conn_id='pg_source_vkm')
-    target_hook = PostgresHook(postgres_conn_id='postgres_default')
+    target_hook = PostgresHook(postgres_conn_id='pg_airflow_test') #postgres_default
     
     # 2. Читаємо дані з джерела
     records = source_hook.get_records("SELECT order_id, product_name, amount FROM orders")
