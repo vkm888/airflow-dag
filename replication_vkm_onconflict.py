@@ -17,7 +17,7 @@ def migrate_data():
     if records:
         # Формуємо SQL запит
         sql = """
-            INSERT INTO orders_replica (order_id, product_name, amount)
+            INSERT INTO airflow_orders (order_id, product_name, amount)
             VALUES (%s, %s, %s)
             ON CONFLICT (order_id) DO NOTHING;
         """
@@ -54,7 +54,7 @@ with DAG(
         task_id='create_target_table',
         conn_id='postgres_default',
         sql="""
-            CREATE TABLE IF NOT EXISTS orders_replica (
+            CREATE TABLE IF NOT EXISTS airflow_orders (
                 order_id INT PRIMARY KEY,
                 product_name VARCHAR(100),
                 amount DECIMAL(10, 2),
